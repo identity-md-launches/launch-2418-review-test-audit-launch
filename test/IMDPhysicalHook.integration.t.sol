@@ -3,6 +3,7 @@ pragma solidity 0.8.26;
 
 import {Vm} from "forge-std/Vm.sol";
 import {HookTestBase} from "./HookTestBase.sol";
+import {IMDPhysicalHook} from "../src/IMDPhysicalHook.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -178,6 +179,9 @@ contract IMDPhysicalHookIntegrationTest is HookTestBase {
         _pool(true);
         PoolKey memory foreign = key;
         foreign.fee = 3000;
+        // Audit 16ef6c00: a key the PoolManager never initialized cannot be bound, so a mistyped bind is correctable.
+        vm.expectRevert(IMDPhysicalHook.PoolNotInitialized.selector);
+        hook.bindPool(foreign);
         vm.prank(address(0xbeef));
         vm.expectRevert();
         IPoolManager(MANAGER).initialize(foreign, uint160(1 << 96));

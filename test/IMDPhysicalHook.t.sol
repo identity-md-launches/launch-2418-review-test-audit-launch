@@ -12,9 +12,11 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
 contract IMDPhysicalHookTest is HookTestBase {
     using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
 
     function testInitialConfigurationAndPermissions() public view {
         assertEq(hook.owner(), address(this));
@@ -46,7 +48,7 @@ contract IMDPhysicalHookTest is HookTestBase {
     function testRejectsIncorrectAddressFlags() public {
         assertTrue(uint160(vm.computeCreateAddress(address(this), vm.getNonce(address(this)))) & 0x3fff != 0x2040);
         vm.expectRevert();
-        new IMDPhysicalHook(address(this), FACTORY);
+        new IMDPhysicalHook(IPoolManager(MANAGER), address(this), FACTORY);
     }
 
     function testExplicitOwnerIsIndependentOfFactory() public {
@@ -58,12 +60,78 @@ contract IMDPhysicalHookTest is HookTestBase {
 
     function testRejectsZeroOwner() public {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
-        new IMDPhysicalHook(address(0), FACTORY);
+        new IMDPhysicalHook(IPoolManager(MANAGER), address(0), FACTORY);
     }
 
     function testRejectsZeroFactory() public {
         vm.expectRevert(IMDPhysicalHook.InvalidLaunchFactory.selector);
-        new IMDPhysicalHook(address(this), address(0));
+        new IMDPhysicalHook(IPoolManager(MANAGER), address(this), address(0));
+    }
+
+    function testRejectsZeroPoolManager() public {
+        vm.expectRevert(IMDPhysicalHook.InvalidPoolManager.selector);
+        new IMDPhysicalHook(IPoolManager(address(0)), address(this), FACTORY);
+    }
+
+    /// The PoolManager is a constructor argument (`$poolManager`), not a compiled constant: a hook built for
+    /// another manager address answers that manager and refuses the canonical one.
+    function testPoolManagerComesFromTheConstructor() public {
+        address otherManager = address(0x4444000000000000000000000000000000004444);
+        deployCodeTo("PoolManager.sol:PoolManager", abi.encode(address(this)), otherManager);
+        IMDPhysicalHook other = _deploy(otherManager, address(this));
+        assertEq(address(other.poolManager()), otherManager);
+        PoolKey memory key = _key(true);
+        key.hooks = IHooks(address(other));
+        vm.prank(MANAGER);
+        vm.expectRevert(IMDPhysicalHook.OnlyPoolManager.selector);
+        other.beforeInitialize(FACTORY, key, uint160(1 << 96));
+        vm.prank(FACTORY);
+        IPoolManager(otherManager).initialize(key, uint160(1 << 96));
+        other.bindPool(key);
+        other.setEnabled(true);
+        vm.prank(MANAGER);
+        vm.expectRevert(IMDPhysicalHook.OnlyPoolManager.selector);
+        other.afterSwap(address(this), key, IPoolManager.SwapParams(true, -1, 1), BalanceDelta.wrap(0), "");
+        vm.prank(otherManager);
+        (bytes4 selector,) =
+            other.afterSwap(address(this), key, IPoolManager.SwapParams(true, -1, 1), BalanceDelta.wrap(0), "");
+        assertEq(selector, IHooks.afterSwap.selector);
+    }
+
+    /// Audit 16ef6c00: a key no pool was initialized for must not consume the one-shot bind.
+    function testBindRequiresAnInitializedPoolAndStaysCorrectable() public {
+        PoolKey memory key = _key(true);
+        PoolKey memory mistyped = key;
+        mistyped.fee = 3000;
+        vm.expectRevert(IMDPhysicalHook.PoolNotInitialized.selector);
+        hook.bindPool(mistyped);
+        vm.expectRevert(IMDPhysicalHook.PoolNotInitialized.selector);
+        hook.bindPool(key);
+        assertFalse(hook.poolBound());
+        vm.expectRevert(IMDPhysicalHook.PoolNotBound.selector);
+        hook.setEnabled(true);
+        _initialize(key);
+        hook.bindPool(key);
+        assertTrue(hook.poolBound());
+        assertEq(hook.poolId(), PoolId.unwrap(key.toId()));
+        vm.expectRevert(IMDPhysicalHook.PoolAlreadyBound.selector);
+        hook.bindPool(mistyped);
+    }
+
+    /// Audit cf32bd75: ownership leaves only through the pending owner's acceptance.
+    function testRenounceOwnershipIsDisabled() public {
+        PoolKey memory key = _enable(true);
+        vm.expectRevert(IMDPhysicalHook.RenounceDisabled.selector);
+        hook.renounceOwnership();
+        vm.prank(address(0xbeef));
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xbeef)));
+        hook.renounceOwnership();
+        assertEq(hook.owner(), address(this));
+        hook.setEnabled(false);
+        assertFalse(hook.enabled());
+        vm.recordLogs();
+        _trigger(key, -1 ether, 1 ether);
+        assertEq(vm.getRecordedLogs().length, 0);
     }
 
     function testRejectsSpoofedBeforeInitialize() public {
@@ -98,6 +166,8 @@ contract IMDPhysicalHookTest is HookTestBase {
 
     function testBindingIsOnceAndSavesExactKey() public {
         PoolKey memory key = _enable(true);
+        (uint160 price,,,) = IPoolManager(MANAGER).getSlot0(key.toId());
+        assertEq(price, uint160(1 << 96));
         assertEq(hook.poolId(), PoolId.unwrap(key.toId()));
         (Currency c0, Currency c1, uint24 fee, int24 spacing, IHooks h) = hook.poolKey();
         assertEq(Currency.unwrap(c0), Currency.unwrap(key.currency0));
@@ -111,6 +181,7 @@ contract IMDPhysicalHookTest is HookTestBase {
 
     function testInvalidBindings() public {
         PoolKey memory key = _key(true);
+        _initialize(key);
         key.currency0 = Currency.wrap(address(0));
         _invalid(key);
         key = _key(true);
@@ -137,6 +208,7 @@ contract IMDPhysicalHookTest is HookTestBase {
         address other = address(0xbeef);
         bytes memory denied = abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, other);
         PoolKey memory key = _key(true);
+        _initialize(key);
         vm.startPrank(other);
         vm.expectRevert(denied);
         hook.bindPool(key);
@@ -168,6 +240,7 @@ contract IMDPhysicalHookTest is HookTestBase {
 
     function testUnboundDisabledAndForeignPoolEmitNothing() public {
         PoolKey memory key = _key(true);
+        _initialize(key);
         vm.recordLogs();
         _trigger(key, -1 ether, 1 ether);
         assertEq(vm.getRecordedLogs().length, 0);

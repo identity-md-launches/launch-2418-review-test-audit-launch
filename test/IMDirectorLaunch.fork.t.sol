@@ -101,7 +101,7 @@ contract IMDirectorLaunchForkTest is Test {
             if ((token < IMD) == tokenBelow && !IImdRegistry(factory.registry()).isRecorded(number)) break;
             ++number;
         }
-        bytes memory hookCode = abi.encodePacked(type(IMDPhysicalHook).creationCode, abi.encode(OWNER, FACTORY));
+        bytes memory hookCode = abi.encodePacked(type(IMDPhysicalHook).creationCode, abi.encode(MANAGER, OWNER, FACTORY));
         p.launchNumber = number;
         p.tokenCreationCode = tokenCode;
         p.hookCreationCode = hookCode;

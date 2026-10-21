@@ -11,12 +11,15 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {BeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
 /// @notice Emits relay-4 commands; an external gateway delivers them to the physical board.
 contract IMDPhysicalHook is IHooks, Ownable2Step {
     using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
 
-    IPoolManager public constant poolManager = IPoolManager(0x8366a39CC670B4001A1121B8F6A443A643e40951);
+    /// @dev The chain's PoolManager, supplied by the launch as `$poolManager`; never a compiled constant.
+    IPoolManager public immutable poolManager;
     address public immutable launchFactory;
     address public constant imdToken = 0x5F7Bb59365ce557C26dbcAa4EE9d39A4b95B7127;
     bytes32 public constant deviceId = bytes32("imd-physical-room-1");
@@ -37,10 +40,13 @@ contract IMDPhysicalHook is IHooks, Ownable2Step {
 
     error OnlyPoolManager();
     error OnlyLaunchFactory();
+    error InvalidPoolManager();
     error InvalidLaunchFactory();
     error PoolAlreadyBound();
     error InvalidPool();
+    error PoolNotInitialized();
     error PoolNotBound();
+    error RenounceDisabled();
     error InvalidThreshold();
     error CallbackDisabled();
 
@@ -60,8 +66,14 @@ contract IMDPhysicalHook is IHooks, Ownable2Step {
         uint256 expiresAt
     );
 
-    constructor(address initialOwner, address initialFactory) Ownable(initialOwner) {
+    /// @param poolManager_ The chain's PoolManager (`$poolManager`). Not called here: the constructor runs in
+    ///        the launch checks on an empty chain, so it only records the address and refuses zero.
+    /// @param initialOwner The explicit owner (`$owner`), never the deploying factory or tx.origin.
+    /// @param initialFactory The launch factory (`$factory`), the only sender beforeInitialize accepts.
+    constructor(IPoolManager poolManager_, address initialOwner, address initialFactory) Ownable(initialOwner) {
+        if (address(poolManager_) == address(0)) revert InvalidPoolManager();
         if (initialFactory == address(0)) revert InvalidLaunchFactory();
+        poolManager = poolManager_;
         launchFactory = initialFactory;
         Hooks.validateHookPermissions(this, getHookPermissions());
     }
@@ -78,8 +90,13 @@ contract IMDPhysicalHook is IHooks, Ownable2Step {
         if (a == address(0) || a >= b || address(key.hooks) != address(this) || (a == imdToken) == (b == imdToken)) {
             revert InvalidPool();
         }
+        PoolId id = PoolIdLibrary.toId(key);
+        // Only a pool the PoolManager has initialized can be bound. Every pool on this hook was opened
+        // through beforeInitialize by the launch factory, so a mistyped key cannot consume the one-shot bind.
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(id);
+        if (sqrtPriceX96 == 0) revert PoolNotInitialized();
         poolKey = key;
-        poolId = PoolId.unwrap(PoolIdLibrary.toId(key));
+        poolId = PoolId.unwrap(id);
         poolBound = true;
         emit PoolBound(poolId, a, b, key.fee, key.tickSpacing, address(key.hooks));
     }
@@ -104,6 +121,12 @@ contract IMDPhysicalHook is IHooks, Ownable2Step {
         if (enabled_ && !poolBound) revert PoolNotBound();
         enabled = enabled_;
         emit EnabledUpdated(enabled_);
+    }
+
+    /// @notice Administration changes hands only through the two-step transfer the pending owner accepts.
+    /// @dev The inherited one-step renunciation would leave an enabled relay with nobody able to disable it.
+    function renounceOwnership() public view override onlyOwner {
+        revert RenounceDisabled();
     }
 
     function afterSwap(

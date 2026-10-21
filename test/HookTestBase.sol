@@ -33,21 +33,34 @@ abstract contract HookTestBase is Test {
 
     function setUp() public virtual {
         vm.warp(1000);
+        // bindPool reads the PoolManager's slot0, so the unit fixture runs a real PoolManager at the address the
+        // hook is given. The canonical fork already has one there and keeps its bytecode intact.
+        if (MANAGER.code.length == 0) deployCodeTo("PoolManager.sol:PoolManager", abi.encode(address(this)), MANAGER);
         hook = _deploy(address(this));
     }
 
     function _deploy(address owner) internal returns (IMDPhysicalHook deployed) {
-        bytes memory init = abi.encodePacked(type(IMDPhysicalHook).creationCode, abi.encode(owner, FACTORY));
+        return _deploy(MANAGER, owner);
+    }
+
+    function _deploy(address manager, address owner) internal returns (IMDPhysicalHook deployed) {
+        bytes memory init = abi.encodePacked(type(IMDPhysicalHook).creationCode, abi.encode(manager, owner, FACTORY));
         bytes32 codeHash = keccak256(init);
         for (uint256 i;; ++i) {
             bytes32 salt = bytes32(i);
             address predicted =
                 address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, codeHash)))));
             if (uint160(predicted) & 0x3fff != 0x2040 || predicted.code.length != 0) continue;
-            deployed = new IMDPhysicalHook{salt: salt}(owner, FACTORY);
+            deployed = new IMDPhysicalHook{salt: salt}(IPoolManager(manager), owner, FACTORY);
             assertEq(address(deployed), predicted);
             break;
         }
+    }
+
+    /// @dev Opens the pool as the launch factory does; initialization never binds or enables the hook.
+    function _initialize(PoolKey memory key) internal {
+        vm.prank(FACTORY);
+        IPoolManager(MANAGER).initialize(key, uint160(1 << 96));
     }
 
     function _key(bool imdIs0) internal view returns (PoolKey memory) {
@@ -62,6 +75,7 @@ abstract contract HookTestBase is Test {
 
     function _enable(bool imdIs0) internal returns (PoolKey memory key) {
         key = _key(imdIs0);
+        _initialize(key);
         hook.bindPool(key);
         hook.setEnabled(true);
     }

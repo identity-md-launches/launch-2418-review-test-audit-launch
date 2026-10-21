@@ -63,8 +63,7 @@ contract InitFrontRunTest is Test {
         });
 
         vm.prank(ATTACKER);
-        (bool frontRun,) =
-            MANAGER.call(abi.encodeCall(IPoolManager.initialize, (launchKey, uint160(1 << 96) / 1000)));
+        (bool frontRun,) = MANAGER.call(abi.encodeCall(IPoolManager.initialize, (launchKey, uint160(1 << 96) / 1000)));
         assertFalse(frontRun, "anyone initialized the launch pool before the hook was deployed");
     }
 }

@@ -31,7 +31,9 @@ def main():
         return subprocess.check_output(values, cwd=ROOT, text=True).strip()
     hook = command(args.forge, "inspect", "IMDPhysicalHook", "bytecode", *build)
     token = command(args.forge, "inspect", "IMDirectorToken", "bytecode", *build)
-    constructor = command(args.cast, "abi-encode", "constructor(address,address)",
+    # Constructor order is [$poolManager, $owner, $factory]; the floor builds its PoolManager at IMD_POOL_MANAGER.
+    constructor = command(args.cast, "abi-encode", "constructor(address,address,address)",
+                          "0x8366a39cc670b4001a1121b8f6a443a643e40951",
                           "0x000000000000000000000000000000000000D35C",
                           "0x000000000000000000000000000000000000FaC7")
     env = os.environ.copy()
