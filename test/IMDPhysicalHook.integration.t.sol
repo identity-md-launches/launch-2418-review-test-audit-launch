@@ -47,8 +47,10 @@ contract IMDPhysicalHookIntegrationTest is HookTestBase {
         }
         address other = imdFirst ? address(0x9000000000000000000000000000000000000000) : address(0x1000);
         deployCodeTo("IMDPhysicalHook.integration.t.sol:TestCoin", other);
-        swaps = new PoolSwapTest(IPoolManager(MANAGER));
-        liquidity = new PoolModifyLiquidityTest(IPoolManager(MANAGER));
+        swaps = PoolSwapTest(deployCode("PoolSwapTest.sol:PoolSwapTest", abi.encode(IPoolManager(MANAGER))));
+        liquidity = PoolModifyLiquidityTest(
+            deployCode("PoolModifyLiquidityTest.sol:PoolModifyLiquidityTest", abi.encode(IPoolManager(MANAGER)))
+        );
         ERC20(IMD).approve(address(swaps), type(uint256).max);
         ERC20(other).approve(address(swaps), type(uint256).max);
         ERC20(IMD).approve(address(liquidity), type(uint256).max);

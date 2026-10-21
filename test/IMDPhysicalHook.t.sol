@@ -101,7 +101,7 @@ contract IMDPhysicalHookTest is HookTestBase {
     /// Audit 16ef6c00: a key no pool was initialized for must not consume the one-shot bind.
     function testBindRequiresAnInitializedPoolAndStaysCorrectable() public {
         PoolKey memory key = _key(true);
-        PoolKey memory mistyped = key;
+        PoolKey memory mistyped = _key(true);
         mistyped.fee = 3000;
         vm.expectRevert(IMDPhysicalHook.PoolNotInitialized.selector);
         hook.bindPool(mistyped);

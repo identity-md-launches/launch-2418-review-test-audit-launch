@@ -44,14 +44,21 @@ abstract contract HookTestBase is Test {
     }
 
     function _deploy(address manager, address owner) internal returns (IMDPhysicalHook deployed) {
-        bytes memory init = abi.encodePacked(type(IMDPhysicalHook).creationCode, abi.encode(manager, owner, FACTORY));
+        // Use the freshly compiled artifact so derived suites do not each embed the constructor.
+        bytes memory init =
+            abi.encodePacked(vm.getCode("IMDPhysicalHook.sol:IMDPhysicalHook"), abi.encode(manager, owner, FACTORY));
         bytes32 codeHash = keccak256(init);
         for (uint256 i;; ++i) {
             bytes32 salt = bytes32(i);
             address predicted =
                 address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, codeHash)))));
             if (uint160(predicted) & 0x3fff != 0x2040 || predicted.code.length != 0) continue;
-            deployed = new IMDPhysicalHook{salt: salt}(IPoolManager(manager), owner, FACTORY);
+            address at;
+            assembly ("memory-safe") {
+                at := create2(0, add(init, 0x20), mload(init), salt)
+            }
+            require(at != address(0), "hook constructor reverted");
+            deployed = IMDPhysicalHook(at);
             assertEq(address(deployed), predicted);
             break;
         }

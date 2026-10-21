@@ -28,12 +28,20 @@ contract IMDirectorLaunchForkTest is Test {
     uint160 constant FLAGS = 0x2040;
     IImdLaunchFactory constant factory = IImdLaunchFactory(FACTORY);
 
-    function testRealFactoryLaunchTokenBelowImd() public { _rehearse(true); }
-    function testRealFactoryLaunchTokenAboveImd() public { _rehearse(false); }
+    function testRealFactoryLaunchTokenBelowImd() public {
+        _rehearse(true);
+    }
+
+    function testRealFactoryLaunchTokenAboveImd() public {
+        _rehearse(false);
+    }
 
     function _rehearse(bool tokenBelow) private {
         string memory rpc = vm.envOr("RH_RPC", string(""));
-        if (bytes(rpc).length == 0) { vm.skip(true); return; }
+        if (bytes(rpc).length == 0) {
+            vm.skip(true);
+            return;
+        }
         vm.createSelectFork(rpc);
         assertEq(block.chainid, 4663);
         IImdLaunchFactory.LaunchParams memory p = _params(tokenBelow);
@@ -49,8 +57,10 @@ contract IMDirectorLaunchForkTest is Test {
         assertEq(IERC20(token).balanceOf(distributor), SUPPLY / 10);
         assertGe(IERC20(token).balanceOf(OWNER), SUPPLY / 10);
         assertLe(IERC20(token).balanceOf(OWNER), SUPPLY * 101 / 1000);
-        assertEq(IERC20(token).balanceOf(OWNER) + IERC20(token).balanceOf(MANAGER)
-            + IERC20(token).balanceOf(distributor), SUPPLY);
+        assertEq(
+            IERC20(token).balanceOf(OWNER) + IERC20(token).balanceOf(MANAGER) + IERC20(token).balanceOf(distributor),
+            SUPPLY
+        );
         assertTrue(IImdRegistry(factory.registry()).isRecorded(p.launchNumber));
 
         IMDPhysicalHook hook = IMDPhysicalHook(hookAddress);
@@ -60,29 +70,46 @@ contract IMDirectorLaunchForkTest is Test {
         assertEq(uint160(hookAddress) & 0x3fff, FLAGS);
         assertFalse(hook.poolBound());
         assertFalse(hook.enabled());
-        PoolKey memory key = PoolKey(Currency.wrap(tokenBelow ? token : IMD),
-            Currency.wrap(tokenBelow ? IMD : token), 12500, 60, IHooks(hookAddress));
+        PoolKey memory key = PoolKey(
+            Currency.wrap(tokenBelow ? token : IMD),
+            Currency.wrap(tokenBelow ? IMD : token),
+            12500,
+            60,
+            IHooks(hookAddress)
+        );
         vm.prank(OWNER);
         hook.bindPool(key);
         assertEq(hook.poolId(), PoolId.unwrap(key.toId()));
         vm.prank(OWNER);
         hook.setEnabled(true);
 
-        PoolSwapTest swaps = new PoolSwapTest(IPoolManager(MANAGER));
+        PoolSwapTest swaps =
+            PoolSwapTest(deployCode("PoolSwapTest.sol:PoolSwapTest", abi.encode(IPoolManager(MANAGER))));
         deal(IMD, address(this), 10 ether);
         IERC20(IMD).approve(address(swaps), type(uint256).max);
         IERC20(token).approve(address(swaps), type(uint256).max);
         bool buyZeroForOne = !tokenBelow;
-        swaps.swap(key, IPoolManager.SwapParams(buyZeroForOne, -1 ether,
-            buyZeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1),
-            PoolSwapTest.TestSettings(false, false), "");
+        swaps.swap(
+            key,
+            IPoolManager.SwapParams(
+                buyZeroForOne, -1 ether, buyZeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
+            ),
+            PoolSwapTest.TestSettings(false, false),
+            ""
+        );
         assertEq(hook.lastCommandId(), 1);
         assertGt(IERC20(token).balanceOf(address(this)), 0);
         vm.warp(vm.getBlockTimestamp() + 10);
-        swaps.swap(key, IPoolManager.SwapParams(!buyZeroForOne,
-            -int256(IERC20(token).balanceOf(address(this))),
-            buyZeroForOne ? TickMath.MAX_SQRT_PRICE - 1 : TickMath.MIN_SQRT_PRICE + 1),
-            PoolSwapTest.TestSettings(false, false), "");
+        swaps.swap(
+            key,
+            IPoolManager.SwapParams(
+                !buyZeroForOne,
+                -int256(IERC20(token).balanceOf(address(this))),
+                buyZeroForOne ? TickMath.MAX_SQRT_PRICE - 1 : TickMath.MIN_SQRT_PRICE + 1
+            ),
+            PoolSwapTest.TestSettings(false, false),
+            ""
+        );
         assertEq(hook.lastCommandId(), 2);
         assertEq(IERC20(token).balanceOf(hookAddress), 0);
         assertEq(IERC20(IMD).balanceOf(hookAddress), 0);
@@ -91,9 +118,11 @@ contract IMDirectorLaunchForkTest is Test {
     function _params(bool tokenBelow) private view returns (IImdLaunchFactory.LaunchParams memory p) {
         bytes memory input = vm.parseBytes(vm.readFile("test/fixtures/kept-launch-input.hex"));
         bytes memory args = new bytes(input.length - 4);
-        for (uint256 i; i < args.length; ++i) args[i] = input[i + 4];
+        for (uint256 i; i < args.length; ++i) {
+            args[i] = input[i + 4];
+        }
         p = abi.decode(args, (IImdLaunchFactory.LaunchParams));
-        bytes memory tokenCode = type(IMDirectorToken).creationCode;
+        bytes memory tokenCode = vm.getCode("IMDirectorToken.sol:IMDirectorToken");
         uint64 number = p.launchNumber + 10000;
         address token;
         while (true) {
@@ -101,7 +130,8 @@ contract IMDirectorLaunchForkTest is Test {
             if ((token < IMD) == tokenBelow && !IImdRegistry(factory.registry()).isRecorded(number)) break;
             ++number;
         }
-        bytes memory hookCode = abi.encodePacked(type(IMDPhysicalHook).creationCode, abi.encode(MANAGER, OWNER, FACTORY));
+        bytes memory hookCode =
+            abi.encodePacked(vm.getCode("IMDPhysicalHook.sol:IMDPhysicalHook"), abi.encode(MANAGER, OWNER, FACTORY));
         p.launchNumber = number;
         p.tokenCreationCode = tokenCode;
         p.hookCreationCode = hookCode;
@@ -124,16 +154,19 @@ contract IMDirectorLaunchForkTest is Test {
         } else {
             p.sqrtPriceX96 = 50108289675009586237282760313921;
             (p.tickLower, p.tickUpper) = (-887220, 128940);
-            p.liquidity = uint128(FullMath.mulDiv(seed, 1 << 96,
-                TickMath.getSqrtPriceAtTick(p.tickUpper) - TickMath.getSqrtPriceAtTick(p.tickLower)));
+            p.liquidity = uint128(
+                FullMath.mulDiv(
+                    seed, 1 << 96, TickMath.getSqrtPriceAtTick(p.tickUpper) - TickMath.getSqrtPriceAtTick(p.tickLower)
+                )
+            );
         }
     }
 
     function _salt(bytes memory code) private pure returns (bytes32) {
         bytes32 hash = keccak256(code);
         for (uint256 i; i < 1_000_000; ++i) {
-            address predicted = address(uint160(uint256(keccak256(
-                abi.encodePacked(bytes1(0xff), FACTORY, bytes32(i), hash)))));
+            address predicted =
+                address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), FACTORY, bytes32(i), hash)))));
             if (uint160(predicted) & 0x3fff == FLAGS) return bytes32(i);
         }
         revert("no matching salt");
