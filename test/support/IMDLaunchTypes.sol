@@ -53,4 +53,3 @@ interface IImdLaunchFactory {
 interface IImdRegistry {
     function isRecorded(uint64 launchNumber) external view returns (bool);
 }
-
