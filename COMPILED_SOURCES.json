@@ -1,5 +1,4 @@
 [
-  "foundry-pp/DeployHelper92.sol",
   "lib/forge-std/src/Base.sol",
   "lib/forge-std/src/StdAssertions.sol",
   "lib/forge-std/src/StdChains.sol",
@@ -79,6 +78,9 @@
   "src/IMDPhysicalHook.sol",
   "src/IMDirectorToken.sol",
   "test/HookTestBase.sol",
+  "test/IMDPhysicalHook.init.t.sol",
   "test/IMDPhysicalHook.integration.t.sol",
-  "test/IMDPhysicalHook.t.sol"
+  "test/IMDPhysicalHook.t.sol",
+  "test/IMDirectorLaunch.fork.t.sol",
+  "test/support/IMDLaunchTypes.sol"
 ]

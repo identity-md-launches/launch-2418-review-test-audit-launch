@@ -17,11 +17,12 @@ contract IMDPhysicalHook is IHooks, Ownable2Step {
     using PoolIdLibrary for PoolKey;
 
     IPoolManager public constant poolManager = IPoolManager(0x8366a39CC670B4001A1121B8F6A443A643e40951);
+    address public immutable launchFactory;
     address public constant imdToken = 0x5F7Bb59365ce557C26dbcAa4EE9d39A4b95B7127;
     bytes32 public constant deviceId = bytes32("imd-physical-room-1");
     uint8 public constant relay = 4;
     uint256 public constant commandTtlSeconds = 120;
-    uint160 public constant HOOK_FLAGS = 0x0040;
+    uint160 public constant HOOK_FLAGS = 0x2040;
 
     PoolKey public poolKey;
     bytes32 public poolId;
@@ -35,6 +36,8 @@ contract IMDPhysicalHook is IHooks, Ownable2Step {
     uint256 public lastTriggerAt;
 
     error OnlyPoolManager();
+    error OnlyLaunchFactory();
+    error InvalidLaunchFactory();
     error PoolAlreadyBound();
     error InvalidPool();
     error PoolNotBound();
@@ -57,11 +60,14 @@ contract IMDPhysicalHook is IHooks, Ownable2Step {
         uint256 expiresAt
     );
 
-    constructor(address initialOwner) Ownable(initialOwner) {
+    constructor(address initialOwner, address initialFactory) Ownable(initialOwner) {
+        if (initialFactory == address(0)) revert InvalidLaunchFactory();
+        launchFactory = initialFactory;
         Hooks.validateHookPermissions(this, getHookPermissions());
     }
 
     function getHookPermissions() public pure returns (Hooks.Permissions memory p) {
+        p.beforeInitialize = true;
         p.afterSwap = true;
     }
 
@@ -136,8 +142,10 @@ contract IMDPhysicalHook is IHooks, Ownable2Step {
         return (IHooks.afterSwap.selector, 0);
     }
 
-    function beforeInitialize(address, PoolKey calldata, uint160) external pure returns (bytes4) {
-        revert CallbackDisabled();
+    function beforeInitialize(address sender, PoolKey calldata, uint160) external view returns (bytes4) {
+        if (msg.sender != address(poolManager)) revert OnlyPoolManager();
+        if (sender != launchFactory) revert OnlyLaunchFactory();
+        return IHooks.beforeInitialize.selector;
     }
 
     function afterInitialize(address, PoolKey calldata, uint160, int24) external pure returns (bytes4) {

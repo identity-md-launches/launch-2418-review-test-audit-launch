@@ -21,11 +21,13 @@ contract IMDPhysicalHookTest is HookTestBase {
         assertEq(hook.pendingOwner(), address(0));
         assertEq(hook.imdToken(), IMD);
         assertEq(address(hook.poolManager()), MANAGER);
+        assertEq(hook.launchFactory(), FACTORY);
         assertEq(hook.deviceId(), DEVICE);
         assertEq(hook.relay(), 4);
         assertEq(hook.commandTtlSeconds(), 120);
-        assertEq(uint160(address(hook)) & 0x3fff, 0x40);
+        assertEq(uint160(address(hook)) & 0x3fff, 0x2040);
         Hooks.Permissions memory p;
+        p.beforeInitialize = true;
         p.afterSwap = true;
         assertEq(abi.encode(hook.getHookPermissions()), abi.encode(p));
         assertFalse(hook.enabled());
@@ -42,9 +44,9 @@ contract IMDPhysicalHookTest is HookTestBase {
     }
 
     function testRejectsIncorrectAddressFlags() public {
-        assertTrue(uint160(vm.computeCreateAddress(address(this), vm.getNonce(address(this)))) & 0x3fff != 0x40);
+        assertTrue(uint160(vm.computeCreateAddress(address(this), vm.getNonce(address(this)))) & 0x3fff != 0x2040);
         vm.expectRevert();
-        new IMDPhysicalHook(address(this));
+        new IMDPhysicalHook(address(this), FACTORY);
     }
 
     function testExplicitOwnerIsIndependentOfFactory() public {
@@ -56,7 +58,36 @@ contract IMDPhysicalHookTest is HookTestBase {
 
     function testRejectsZeroOwner() public {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
-        new IMDPhysicalHook(address(0));
+        new IMDPhysicalHook(address(0), FACTORY);
+    }
+
+    function testRejectsZeroFactory() public {
+        vm.expectRevert(IMDPhysicalHook.InvalidLaunchFactory.selector);
+        new IMDPhysicalHook(address(this), address(0));
+    }
+
+    function testRejectsSpoofedBeforeInitialize() public {
+        vm.expectRevert(IMDPhysicalHook.OnlyPoolManager.selector);
+        hook.beforeInitialize(FACTORY, _key(true), uint160(1 << 96));
+    }
+
+    function testBeforeInitializeRequiresFactorySender() public {
+        PoolKey memory key = _key(true);
+        vm.prank(MANAGER);
+        vm.expectRevert(IMDPhysicalHook.OnlyLaunchFactory.selector);
+        hook.beforeInitialize(address(0xbeef), key, uint160(1 << 96));
+    }
+
+    function testFactoryInitializeDoesNotBindEnableOrEmit() public {
+        PoolKey memory key = _key(true);
+        vm.recordLogs();
+        vm.prank(MANAGER);
+        assertEq(hook.beforeInitialize(FACTORY, key, uint160(1 << 96)), IHooks.beforeInitialize.selector);
+        assertEq(vm.getRecordedLogs().length, 0);
+        assertFalse(hook.poolBound());
+        assertFalse(hook.enabled());
+        assertEq(hook.poolId(), bytes32(0));
+        assertEq(hook.lastCommandId(), 0);
     }
 
     function testCannotEnableBeforeBinding() public {

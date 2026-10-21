@@ -1,16 +1,33 @@
-# Validation before IMD admission
+# Validation of the initialization compatibility fix
 
-2026-10-21. No real transaction has been broadcast.
+2026-10-22 (Asia/Yekaterinburg). No token or hook has been deployed in mainnet. The user paid one 0.5 IMD Intake request; its job `582906e4-3ecf-48b2-ab13-e3a2c52743e8` stopped before deployment because the original afterSwap-only specification conflicted with protected admission.
 
-- Foundry v1.8.3 (`cae51ad458f6abb64852b7709eb784352429825d`), official macOS arm64 binary archive SHA-256 `562f9c2f9094e512f1efc1e005c79de7642c27ffc1e7e9dcf8e31baa54577d6e` matched the GitHub release digest.
-- Solidity 0.8.26 official macOS compiler SHA-256 `0ff016aef2396b12d1fc65429d8ea6cf53c2ee4b041bb8925644615ee1c30ab9` matched ethereum/solc-bin metadata. Solidity compilation succeeded.
-- Full local suite: **28 passed, 0 failed, 0 skipped**, including 512 fuzz runs over actual amount, buy/sell and IMD currency ordering.
-- Canonical Robinhood fork: **8 passed, 0 failed, 0 skipped**, starting at block 94505041. Actual deployed PoolManager and IMD bytecode remain intact in this mode. Test balances, test coins, hooks and pools exist only in the local fork. No RPC writes or real funds were used.
-- Exact-input and exact-output buy/sell work with IMD as either currency. Unbound/disabled, threshold and cooldown swaps continue successfully without commands. Foreign initialization and swaps do not capture binding. Entire-swap rollback clears the command. Zero-liquidity LP fee collection succeeds.
-- Owner restrictions, two-step transfer, one-time binding, int128 minimum, timestamp-zero first reaction and exact event ABI are covered.
-- Measured `afterSwap` external-call gas in the local gas report: maximum **80,253** in the exercised cases. This is a measurement, not a guarantee for arbitrary execution environments.
-- Hook runtime: 4,455 bytes; creation code: 5,132 bytes before the 32-byte owner argument. Correct address flags are validated in the production constructor and exercised by real CREATE2 deployments in tests.
+## Reproduced issue and fix
 
-The test suite does not call the live LaunchFactory's authorized deployment entry point. IMD must still review its manifest, attest the supplied source, mine its deployment salt and execute its normal protected admission tests. Report a real factory incompatibility; do not silently alter SPEC.md or physical gateway behavior.
+The original commit `9701276d06b5c0f9840da7d5b144d51a22514dd9` permitted counterfactual pool initialization. Both tests in the accepted auditor proof fail on that original source. They now pass in `test/IMDPhysicalHook.init.t.sol`. The minimal production change adds `beforeInitialize`, flags `0x2040`, and an immutable nonzero factory supplied as `$factory` after `$owner`. Only the canonical PoolManager may call it and its sender must be that factory. Initialization does not bind, enable or emit relay commands. The gateway event, swap logic, owner activation sequence and token economics are preserved.
 
-The local Foundry preprocessor emits a Solar warning about the indirect `Ownable` constructor; the pinned Solidity compiler successfully compiles the standard `Ownable2Step`/`Ownable(initialOwner)` form, and all execution tests pass. This warning did not replace or suppress compiler errors.
+## Verified results
+
+- Full offline suite: **34 passed, 0 failed, 2 explicitly skipped**. The two skipped cases require `RH_RPC`; they were run successfully in the separate real-factory rehearsal below. Fuzz runs: 512.
+- Canonical Robinhood integration suite: **8 passed, 0 failed, 0 skipped**, at fork block 94534844. Canonical PoolManager and IMD bytecode remain intact. Local balances, pools and hook deployments do not leave the fork.
+- Complete real-LaunchFactory rehearsal: **2 passed, 0 failed, 0 skipped**, at fork blocks 94533223 and 94533228. The actual factory deployer is impersonated only in the local EVM. No production contract code, callback validation or authorization is mocked or overwritten. The real factory creates the token and factory-gated hook, initializes and seeds Director/IMD with 80/10/10; owner is the explicit user wallet. Tests then bind and enable locally and execute successful buys and sells. Registry, supply, allocation, factory identity, permission bits and command counters are asserted. Each launch call stays below the 16,777,216 gas cap.
+- Published IMD admission floor: **13 passed, 0 failed, 0 skipped in each token order** (4 hook, 2 ownership/fee collection, 7 token). Tests are copied unchanged into a temporary project from `identity-md-launches/launch-2255-launch-curb-curb-uniswap` at `b810098c73b7de0cf08257aa01a08b279e965c7f`, with that repository's compatible v4 dependencies. Our exact creation code and probe-resolved constructor arguments are supplied to it. These published tests are useful independent evidence; the current server-side floor and attestation remain authoritative.
+- Hook creation code: 5,408 bytes before the two 32-byte constructor arguments; runtime: 4,647 bytes.
+
+Foundry v1.8.3 and native Solidity 0.8.26 remain pinned (Cancun, optimizer 200, via IR, bytecode hash none, FFI disabled). Original dependency provenance is in `DEPENDENCIES.json`. The Foundry Solar preprocessor warns about the standard indirect `Ownable` constructor; native Solidity compilation and all executed tests succeed.
+
+## Reproduce
+
+```sh
+forge test -vv
+IMDIRECTOR_CANONICAL_FORK=true forge test --fork-url https://rpc.mainnet.chain.robinhood.com --match-contract IMDPhysicalHookIntegrationTest -vv
+RH_RPC=https://rpc.mainnet.chain.robinhood.com forge test --match-contract IMDirectorLaunchForkTest -vv
+
+git clone https://github.com/identity-md-launches/launch-2255-launch-curb-curb-uniswap /tmp/imd-admission-reference
+git -C /tmp/imd-admission-reference checkout b810098c73b7de0cf08257aa01a08b279e965c7f
+python3 script/check_published_admission.py --reference /tmp/imd-admission-reference
+```
+
+The factory ABI and historical launch-input fixture in `test/support/IMDLaunchTypes.sol` and `test/fixtures/kept-launch-input.hex` are MIT-licensed test material from the same pinned public example. Only the ABI import prefix was adapted; the fixture is unchanged (SHA-256 `7e35200aa8ec695aca23dc75115e33a40e94c51e72c0f0d8b9d924f2b775b01b`). Its historical record/attestation fields are rehearsal data, not a new attestation or an actual launch approval. IMD must still review, attest and deploy the final supplied source through its own pipeline.
+
+One-time `bindPool` remains an owner responsibility: verify the exact initialized Director/IMD PoolKey and poolId before signing. A mistaken key cannot be corrected in this implementation.

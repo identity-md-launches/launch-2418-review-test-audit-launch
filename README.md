@@ -6,7 +6,7 @@ Self-contained Foundry source for an IMD Protocol `univ4_hook` launch on Robinho
 - `IMDirectorToken` mints the entire fixed 1e27 supply to its deployer once. The IMD factory performs the allocation; the token has no owner, external mint or transfer tax.
 - Requested allocation: 80% pool, 10% explicit remainder recipient, 10% swarm. These terms belong in request `economics`, not extra manifest fields.
 - Standard pool fee: 12500 (1.25%). The physical hook adds 0% and needs no backend signer.
-- `IMDPhysicalHook` has only the `afterSwap` permission (exact address mask `0x0040`); no return-delta permissions. All other callback implementations revert if called directly; PoolManager does not call disabled callbacks.
+- `IMDPhysicalHook` declares `beforeInitialize` and `afterSwap` (exact address mask `0x2040`); no return-delta permissions. Initialization requires the canonical PoolManager and an explicitly supplied factory sender. It does not bind the pool or enable reactions. Other callback implementations revert if called directly; PoolManager does not call disabled callbacks.
 
 ## Build
 
@@ -29,7 +29,7 @@ IMDIRECTOR_CANONICAL_FORK=true forge test \
 
 ## Deployment and activation
 
-Use `launch.json` through IMD Protocol with `onchain: "univ4_hook"`, `chainId: 4663`, `pairWith: "imd"` and explicit `owner`. The hook constructor takes only `initialOwner`; it does not read chain state. All environment constants are compiled into the hook:
+Use `launch.json` through IMD Protocol with `onchain: "univ4_hook"`, `chainId: 4663`, `pairWith: "imd"` and explicit `owner`. The hook constructor takes `initialOwner` and `initialFactory`, resolved as `$owner` and `$factory`; it does not read chain state. Protocol and device constants are compiled into the hook:
 
 - IMD: `0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127`
 - PoolManager: `0x8366a39cc670b4001a1121b8f6a443a643e40951`
@@ -42,7 +42,7 @@ The factory must mine a CREATE2 salt for the exact permission bits and actual co
 2. Operator configures the external gateway with the verified hook address and poolId and confirms event polling and board readiness.
 3. Owner calls `setEnabled(true)`.
 
-Do not perform these owner actions automatically, bind the first public swap, silently change permissions or modify the event ABI. Report an actual factory incompatibility instead. The integration suite proves compatibility with PoolManager operations; it does not substitute for IMD's own manifest, attestation and factory deployment admission.
+Do not perform these owner actions automatically, bind the first public swap or modify the event ABI. Any further compatibility change must be justified with a concrete finding. The original afterSwap-only version was blocked before deployment: its permissions allowed counterfactual initialization and did not satisfy the IMD admission floor. The factory-gated initialization callback and two regression tests address that reproduced issue explicitly. Server-side review, attestation and admission remain necessary.
 
 ## Review boundaries
 

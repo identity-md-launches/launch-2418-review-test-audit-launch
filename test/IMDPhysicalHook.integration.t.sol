@@ -53,8 +53,8 @@ contract IMDPhysicalHookIntegrationTest is HookTestBase {
         ERC20(IMD).approve(address(liquidity), type(uint256).max);
         ERC20(other).approve(address(liquidity), type(uint256).max);
         key = _key(imdFirst);
-        // Factory-sender initialization and seeding succeed with afterSwap-only permissions.
-        vm.prank(0xA25B02A1e93903b790E6aaf7dA1b8B8d50294645);
+        // Only the declared factory can initialize; initialization does not bind or enable reactions.
+        vm.prank(FACTORY);
         IPoolManager(MANAGER).initialize(key, uint160(1 << 96));
         liquidity.modifyLiquidity(key, IPoolManager.ModifyLiquidityParams(-600, 600, 1000 ether, bytes32(0)), "");
     }
@@ -174,11 +174,14 @@ contract IMDPhysicalHookIntegrationTest is HookTestBase {
         assertEq(hook.lastCommandId(), 1);
     }
 
-    function testPublicForeignInitializeCannotCaptureBinding() public {
+    function testFactoryOnlyForeignInitializeCannotCaptureBinding() public {
         _pool(true);
         PoolKey memory foreign = key;
         foreign.fee = 3000;
         vm.prank(address(0xbeef));
+        vm.expectRevert();
+        IPoolManager(MANAGER).initialize(foreign, uint160(1 << 96));
+        vm.prank(FACTORY);
         IPoolManager(MANAGER).initialize(foreign, uint160(1 << 96));
         liquidity.modifyLiquidity(foreign, IPoolManager.ModifyLiquidityParams(-600, 600, 1000 ether, bytes32(0)), "");
         assertFalse(hook.poolBound());

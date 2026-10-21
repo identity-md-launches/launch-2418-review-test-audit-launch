@@ -16,6 +16,7 @@ abstract contract HookTestBase is Test {
     IMDPhysicalHook internal hook;
     address internal constant IMD = 0x5F7Bb59365ce557C26dbcAa4EE9d39A4b95B7127;
     address internal constant MANAGER = 0x8366a39CC670B4001A1121B8F6A443A643e40951;
+    address internal constant FACTORY = 0xA25B02A1e93903b790E6aaf7dA1b8B8d50294645;
     bytes32 internal constant DEVICE = bytes32("imd-physical-room-1");
     uint256 internal constant MIN = 0.05 ether;
 
@@ -36,14 +37,14 @@ abstract contract HookTestBase is Test {
     }
 
     function _deploy(address owner) internal returns (IMDPhysicalHook deployed) {
-        bytes memory init = abi.encodePacked(type(IMDPhysicalHook).creationCode, abi.encode(owner));
+        bytes memory init = abi.encodePacked(type(IMDPhysicalHook).creationCode, abi.encode(owner, FACTORY));
         bytes32 codeHash = keccak256(init);
         for (uint256 i;; ++i) {
             bytes32 salt = bytes32(i);
             address predicted =
                 address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, codeHash)))));
-            if (uint160(predicted) & 0x3fff != 0x40 || predicted.code.length != 0) continue;
-            deployed = new IMDPhysicalHook{salt: salt}(owner);
+            if (uint160(predicted) & 0x3fff != 0x2040 || predicted.code.length != 0) continue;
+            deployed = new IMDPhysicalHook{salt: salt}(owner, FACTORY);
             assertEq(address(deployed), predicted);
             break;
         }
